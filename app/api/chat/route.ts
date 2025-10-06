@@ -19,14 +19,15 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { sector = "general", prompt = "", history = [], lead } = await req.json();
+    const { lang = "en", sector = "general", prompt = "", history = [], lead } = await req.json();
 
     // lead may contain { name, email, sector } from the form
     const sectorText = lead?.sector || sector;
 
     const system = `You are BloomoGPT Business Copilot.
 Audience: companies optimizing domestic operations and export growth.
-Language: Detect and respond in the user's language automatically.
+Language: Reply in ${lang.toUpperCase()} unless the user clearly switches language.
+
 Sector: ${sectorText}.
 Guidelines:
 - Start with 2–3 concise sentences, then provide exactly 3 actionable next steps.
