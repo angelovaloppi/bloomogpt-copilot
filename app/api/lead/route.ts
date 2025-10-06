@@ -2,7 +2,8 @@ export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
-import { supaAdmin } from "@/app/lib/supa";
+import { supaAdmin } from "../../../lib/supa";
+
 
 function cors(origin?: string) {
   return {
