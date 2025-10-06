@@ -1,38 +1,67 @@
-// app/api/lead/route.ts
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
+import { supaAdmin } from "@/app/lib/supa";
 
-// NOTE: MVP storage = logs. Later we'll plug Supabase/CRM.
-export async function OPTIONS() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": process.env.RUNTIME_ORIGIN || "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type"
-    }
-  });
+function cors(origin?: string) {
+  return {
+    "Access-Control-Allow-Origin": "*", // keep open while testing
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Vary": "Origin"
+  };
+}
+
+export async function OPTIONS(req: NextRequest) {
+  return new Response(null, { status: 204, headers: cors(req.headers.get("origin") || "") });
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    console.log("Lead captured:", body); // view in Vercel logs
-    return new Response(JSON.stringify({ ok: true }), {
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": process.env.RUNTIME_ORIGIN || "*"
-      }
+    const body = await req.json(); // { name, email, sector, sessionId, ts }
+
+    // 1) store the lead
+    const { data: leadData, error: leadErr } = await supaAdmin
+      .from("lead")
+      .insert({
+        email: body.email,
+        name: body.name,
+        sector: body.sector
+      })
+      .select();
+
+    if (leadErr) {
+      // bubble up a clear error
+      return new Response(JSON.stringify({ ok: false, step: "insert_lead", error: leadErr.message }), {
+        status: 500,
+        headers: { "Content-Type": "application/json", ...cors(req.headers.get("origin") || "") }
+      });
+    }
+
+    // 2) optional: log the event
+    const { error: evtErr } = await supaAdmin
+      .from("events")
+      .insert({
+        email: body.email,
+        type: "lead_created",
+        payload: body
+      });
+
+    if (evtErr) {
+      return new Response(JSON.stringify({ ok: false, step: "insert_event", error: evtErr.message }), {
+        status: 500,
+        headers: { "Content-Type": "application/json", ...cors(req.headers.get("origin") || "") }
+      });
+    }
+
+    return new Response(JSON.stringify({ ok: true, lead: leadData?.[0] || null }), {
+      headers: { "Content-Type": "application/json", ...cors(req.headers.get("origin") || "") }
     });
   } catch (e: any) {
-    return new Response(JSON.stringify({ ok: false, error: e.message }), {
-      status: 400,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": process.env.RUNTIME_ORIGIN || "*"
-      }
+    return new Response(JSON.stringify({ ok: false, step: "exception", error: e?.message || String(e) }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", ...cors(req.headers.get("origin") || "") }
     });
   }
 }
