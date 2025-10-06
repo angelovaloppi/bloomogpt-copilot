@@ -74,6 +74,7 @@ function t(key) {
   lang: detectLang(),   // <— this line auto-detects user’s language
   suggestions: []
 };
+window.state = state;
 
   function ui() {
     el.innerHTML = `
