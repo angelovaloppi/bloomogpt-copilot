@@ -8,12 +8,72 @@
   };
 
   const el = document.getElementById("bloomogpt");
-  const state = {
-    sessionId: crypto.randomUUID(),
-    lead: null, // { name, email, sector }
-    history: [],
-    suggestions: []
-  };
+  // --- LANGUAGE SETUP (insert this at the very top of widget.js) ---
+
+// Supported languages
+const SUPPORTED_LANGS = ["en", "it", "fr", "de", "es"];
+
+// Auto-detect from browser
+function detectLang() {
+  const raw = (navigator.language || navigator.userLanguage || "en").toLowerCase();
+  const short = raw.split("-")[0];
+  return SUPPORTED_LANGS.includes(short) ? short : "en";
+}
+
+// Translation dictionary
+const I18N = {
+  en: {
+    title: "BloomoGPT – Business Copilot",
+    name: "Your name",
+    email: "you@company.com",
+    sector: "e.g., premium wine, organic snacks, SaaS analytics...",
+    continue: "Continue",
+    langLabel: "Language",
+    suggestionsTitle: "Suggestions",
+    starterTasks(sector) {
+      return [
+        "Export regulations for your products",
+        "Prospect list of distributors/retailers",
+        "Competitor price mapping in target markets",
+        "Channel strategy & margin model",
+        "Quarterly promo plan"
+      ];
+    }
+  },
+  it: {
+    title: "BloomoGPT – Business Copilot",
+    name: "Il tuo nome",
+    email: "tu@azienda.com",
+    sector: "es. vino premium, snack biologici, SaaS analytics...",
+    continue: "Continua",
+    langLabel: "Lingua",
+    suggestionsTitle: "Suggerimenti",
+    starterTasks(sector) {
+      return [
+        "Norme export per i tuoi prodotti",
+        "Lista prospect di distributori/retail",
+        "Mappatura prezzi competitor nei mercati target",
+        "Strategia canali e modello margini",
+        "Piano promo per il prossimo trimestre"
+      ];
+    }
+  }
+};
+
+// Translation helper
+function t(key) {
+  const pack = I18N[state.lang] || I18N.en;
+  return pack[key] || (I18N.en[key] || key);
+}
+
+// --- END OF LANGUAGE SETUP ---
+
+ const state = {
+  sessionId: crypto.randomUUID(),
+  lead: null,
+  lang: detectLang(),   // <— this line auto-detects user’s language
+  suggestions: []
+};
 
   function ui() {
     el.innerHTML = `
