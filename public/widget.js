@@ -1,5 +1,6 @@
 (function () {
-  // Update if your Vercel URL differs:
+  // ------- CONFIG -------
+  // If your Vercel URL ever changes, update this:
   const API_BASE = "https://bloomogpt-copilot.vercel.app";
   const API = {
     chat: API_BASE + "/api/chat",
@@ -7,75 +8,71 @@
     lead: API_BASE + "/api/lead"
   };
 
-  const el = document.getElementById("bloomogpt");
-  // --- LANGUAGE SETUP (insert this at the very top of widget.js) ---
-
-// Supported languages
-const SUPPORTED_LANGS = ["en", "it", "fr", "de", "es"];
-
-// Auto-detect from browser
-function detectLang() {
-  const raw = (navigator.language || navigator.userLanguage || "en").toLowerCase();
-  const short = raw.split("-")[0];
-  return SUPPORTED_LANGS.includes(short) ? short : "en";
-}
-
-// Translation dictionary
-const I18N = {
-  en: {
-    title: "BloomoGPT – Business Copilot",
-    name: "Your name",
-    email: "you@company.com",
-    sector: "e.g., premium wine, organic snacks, SaaS analytics...",
-    continue: "Continue",
-    langLabel: "Language",
-    suggestionsTitle: "Suggestions",
-    starterTasks(sector) {
-      return [
-        "Export regulations for your products",
-        "Prospect list of distributors/retailers",
-        "Competitor price mapping in target markets",
-        "Channel strategy & margin model",
-        "Quarterly promo plan"
-      ];
-    }
-  },
-  it: {
-    title: "BloomoGPT – Business Copilot",
-    name: "Il tuo nome",
-    email: "tu@azienda.com",
-    sector: "es. vino premium, snack biologici, SaaS analytics...",
-    continue: "Continua",
-    langLabel: "Lingua",
-    suggestionsTitle: "Suggerimenti",
-    starterTasks(sector) {
-      return [
-        "Norme export per i tuoi prodotti",
-        "Lista prospect di distributori/retail",
-        "Mappatura prezzi competitor nei mercati target",
-        "Strategia canali e modello margini",
-        "Piano promo per il prossimo trimestre"
-      ];
-    }
+  // ------- LANGUAGE SETUP -------
+  const SUPPORTED_LANGS = ["en", "it", "fr", "de", "es"];
+  function detectLang() {
+    const raw = (navigator.language || navigator.userLanguage || "en").toLowerCase();
+    const short = raw.split("-")[0];
+    return SUPPORTED_LANGS.includes(short) ? short : "en";
   }
-};
 
-// Translation helper
-function t(key) {
-  const pack = I18N[state.lang] || I18N.en;
-  return pack[key] || (I18N.en[key] || key);
-}
+  const I18N = {
+    en: {
+      title: "BloomoGPT – Business Copilot",
+      subtitle: "Tell us who you are to personalize your experience.",
+      name: "Your name",
+      email: "you@company.com",
+      sector: "e.g., premium wine, organic snacks, SaaS analytics...",
+      continue: "Continue",
+      suggestionsTitle: "Suggestions",
+      yourRequest: "Your request",
+      requestPlaceholder: "Type your request...",
+      ask: "Ask",
+      welcomePrefix: "Welcome",
+      sectorLabel: "Sector",
+      suggestedTasks: "Suggested tasks",
+      formError: "Please fill name, email and sector.",
+      emailError: "Please enter a valid email address.",
+      saveError: "Could not save your info. Details:\n"
+    },
+    it: {
+      title: "BloomoGPT – Business Copilot",
+      subtitle: "Dicci chi sei per personalizzare l'esperienza.",
+      name: "Il tuo nome",
+      email: "tu@azienda.com",
+      sector: "es. vino premium, snack biologici, SaaS analytics...",
+      continue: "Continua",
+      suggestionsTitle: "Suggerimenti",
+      yourRequest: "La tua richiesta",
+      requestPlaceholder: "Scrivi la tua richiesta...",
+      ask: "Chiedi",
+      welcomePrefix: "Benvenuto/a",
+      sectorLabel: "Settore",
+      suggestedTasks: "Attività suggerite",
+      formError: "Compila nome, email e settore.",
+      emailError: "Inserisci un indirizzo email valido.",
+      saveError: "Non è stato possibile salvare i dati. Dettagli:\n"
+    }
+  };
 
-// --- END OF LANGUAGE SETUP ---
+  function t(key) {
+    const pack = I18N[state.lang] || I18N.en;
+    return pack[key] || (I18N.en[key] || key);
+  }
 
- const state = {
-  sessionId: crypto.randomUUID(),
-  lead: null,
-  lang: detectLang(),   // <— this line auto-detects user’s language
-  suggestions: []
-};
-window.state = state;
+  // ------- STATE -------
+  const el = document.getElementById("bloomogpt");
+  const state = {
+    sessionId: crypto.randomUUID(),
+    lead: null,
+    lang: detectLang(),
+    suggestions: [],
+    history: []
+  };
+  // Expose for quick debugging in console
+  window.state = state;
 
+  // ------- UI -------
   function ui() {
     el.innerHTML = `
       <style>
@@ -84,7 +81,7 @@ window.state = state;
         h2 { margin: 0 0 16px 0; font-size: 28px; line-height: 1.2; letter-spacing: .3px; }
         .row { margin: 14px 0; }
         label { display:block; font-size: 13px; opacity:.9; margin-bottom:6px; }
-        input, textarea { width:100%; padding:12px 14px; border-radius:10px; border:1px solid #2b2b2b; background:#121214; color:#fff; }
+        input, textarea, select { width:100%; padding:12px 14px; border-radius:10px; border:1px solid #2b2b2b; background:#121214; color:#fff; }
         button { padding:12px 16px; border-radius:10px; border:1px solid #2b2b2b; background:#1b1b1e; color:#fff; cursor:pointer; }
         button.primary { background:#1f2937; }
         .chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
@@ -98,39 +95,43 @@ window.state = state;
 
       <div class="wrap">
         <div class="card">
-          <h2>BloomoGPT – Business Copilot</h2>
+          <h2>${t("title")}</h2>
 
           ${!state.lead ? `
-            <div class="subtitle">Tell us who you are to personalize your experience.</div>
+            <div class="subtitle">${t("subtitle")}</div>
+
             <div class="row flex">
               <div style="flex:1">
-                <label>Name</label>
-                <input id="lead-name" placeholder="Your name" />
+                <label>${t("name")}</label>
+                <input id="lead-name" placeholder="${t("name")}" />
               </div>
               <div style="flex:1">
                 <label>Email</label>
-                <input id="lead-email" placeholder="you@company.com" />
+                <input id="lead-email" placeholder="${t("email")}" />
               </div>
             </div>
+
             <div class="row">
-              <label>Sector</label>
-              <input id="lead-sector" placeholder="e.g., premium wine, organic snacks, SaaS analytics..." />
+              <label>${t("sectorLabel")}</label>
+              <input id="lead-sector" placeholder="${t("sector")}" />
             </div>
+
             <div class="row">
-              <button id="lead-save" class="primary">Continue</button>
+              <button id="lead-save" class="primary">${t("continue")}</button>
             </div>
           ` : `
-            <div class="subtitle">Welcome, ${escapeHTML(state.lead.name)} — sector: ${escapeHTML(state.lead.sector)}</div>
+            <div class="subtitle">${t("welcomePrefix")}, ${escapeHTML(state.lead.name)} — ${t("sectorLabel").toLowerCase()}: ${escapeHTML(state.lead.sector)}</div>
+
             <div class="row">
-              <label>Suggested tasks</label>
+              <label>${t("suggestedTasks")}</label>
               <div id="sugg" class="chips"></div>
             </div>
 
             <div class="row">
-              <label>Your request</label>
+              <label>${t("yourRequest")}</label>
               <div class="flex">
-                <input id="prompt" placeholder="Type your request..." />
-                <button id="ask" class="primary">Ask</button>
+                <input id="prompt" placeholder="${t("requestPlaceholder")}" />
+                <button id="ask" class="primary">${t("ask")}</button>
               </div>
             </div>
 
@@ -149,26 +150,50 @@ window.state = state;
     }
   }
 
+  // ------- ACTIONS -------
   async function saveLead() {
     const name = el.querySelector("#lead-name").value.trim();
     const email = el.querySelector("#lead-email").value.trim();
     const sector = el.querySelector("#lead-sector").value.trim();
-    if (!name || !email || !sector) { alert("Please fill name, email and sector."); return; }
 
-    const lead = { name, email, sector, sessionId: state.sessionId, ts: Date.now() };
-    // Store server-side (MVP: logs). Later we'll wire to Supabase/CRM.
-    try { await fetch(API.lead, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(lead) }); } catch(e){}
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+    if (!name || !email || !sector) { alert(t("formError")); return; }
+    if (!emailOk) { alert(t("emailError")); return; }
+
+    const lead = { name, email, sector, sessionId: state.sessionId, ts: Date.now(), lang: state.lang };
+
+    try {
+      const res = await fetch(API.lead, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(lead)
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        alert(t("saveError") + txt);
+        return;
+      }
+    } catch (e) {
+      alert(t("saveError") + (e?.message || e));
+      return;
+    }
 
     state.lead = lead;
-    // Fetch tailored suggestions
     await refreshSuggestions(sector);
     ui();
   }
 
   async function refreshSuggestions(sectorText) {
-    const r = await fetch(API.sugg + `?sector=${encodeURIComponent(sectorText||"")}`);
-    const j = await r.json();
-    state.suggestions = j.suggestions || [];
+    try {
+      const r = await fetch(API.sugg + `?sector=${encodeURIComponent(sectorText||"")}&lang=${state.lang}`);
+      const j = await r.json();
+      // Combine with a small local starter set (optional, language-aware)
+      const starters = starterTasks(state.lang, sectorText);
+      state.suggestions = (j.suggestions || starters || []).slice(0, 8);
+    } catch {
+      state.suggestions = starterTasks(state.lang, sectorText);
+    }
   }
 
   function renderSuggestions() {
@@ -179,7 +204,7 @@ window.state = state;
       const span = document.createElement("span");
       span.className = "chip";
       span.textContent = t;
-      span.onclick = () => { el.querySelector("#prompt").value = t; };
+      span.onclick = () => { const p = el.querySelector("#prompt"); if (p) p.value = t; };
       box.appendChild(span);
     });
   }
@@ -199,6 +224,7 @@ window.state = state;
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        lang: state.lang,                           // ensure language is sent
         sector: state.lead?.sector || "general",
         prompt,
         history: state.history,
@@ -222,7 +248,21 @@ window.state = state;
     input.value = "";
   }
 
+  // ------- HELPERS -------
   function escapeHTML(s){ return (s||"").replace(/[&<>"']/g,m=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[m])); }
 
+  function starterTasks(lang, sector) {
+    const pack = I18N[lang] || I18N.en;
+    // could tailor by sector later; keeping simple now
+    return [
+      pack.suggestionsTitle === "Suggerimenti" ? "Norme export per i tuoi prodotti" : "Export regulations for your products",
+      pack.suggestionsTitle === "Suggerimenti" ? "Lista prospect (distributori/retail)" : "Prospect list (distributors/retailers)",
+      pack.suggestionsTitle === "Suggerimenti" ? "Mappatura prezzi competitor" : "Competitor price mapping",
+      pack.suggestionsTitle === "Suggerimenti" ? "Strategia canali & margini" : "Channel strategy & margin model",
+      pack.suggestionsTitle === "Suggerimenti" ? "Piano promo trimestrale" : "Quarterly promo plan"
+    ];
+  }
+
+  // initial render
   ui();
 })();
