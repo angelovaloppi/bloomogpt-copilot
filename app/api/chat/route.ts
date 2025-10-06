@@ -19,17 +19,20 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { lang = "en", sector = "general", prompt = "", history = [] } =
-      await req.json();
+    const { sector = "general", prompt = "", history = [], lead } = await req.json();
+
+    // lead may contain { name, email, sector } from the form
+    const sectorText = lead?.sector || sector;
 
     const system = `You are BloomoGPT Business Copilot.
 Audience: companies optimizing domestic operations and export growth.
-Language: ${lang}. If unclear, ask once then proceed.
-Sector: ${sector}.
+Language: Detect and respond in the user's language automatically.
+Sector: ${sectorText}.
 Guidelines:
 - Start with 2–3 concise sentences, then provide exactly 3 actionable next steps.
 - Prefer structured outputs (bullets/tables/checklists) when useful.
-- Always surface 1 missing critical input to proceed.`;
+- Always surface 1 missing critical input to proceed.
+- If compliance/regulatory topics arise, ask for target market(s) and outline the checklist succinctly.`;
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
@@ -73,4 +76,3 @@ Guidelines:
     });
   }
 }
-
