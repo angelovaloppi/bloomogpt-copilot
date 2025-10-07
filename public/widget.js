@@ -74,36 +74,38 @@
     lang: detectLang(),
     suggestions: [],
     history: [],
-    _welcomed: false
+    _welcomed: false,
+    conversationId: null
   };
-  window.state = state; // for console debugging
+  window.state = state;
 
-  // Try to restore from localStorage (soft login)
+  // Restore lead + conversationId from localStorage (soft login + resume)
   try {
-    const cached = localStorage.getItem("bloomogpt_lead");
-    if (cached) {
-      const lead = JSON.parse(cached);
+    const cachedLead = localStorage.getItem("bloomogpt_lead");
+    if (cachedLead) {
+      const lead = JSON.parse(cachedLead);
       if (lead?.email) state.lead = lead;
     }
+    const cachedConv = localStorage.getItem("bloomogpt_conversation_id");
+    if (cachedConv) state.conversationId = cachedConv;
   } catch {}
 
-  // If we have a cached lead, verify with server (keeps it fresh across devices)
+  // If we have a cached lead, verify with server and refresh suggestions
   if (state.lead?.email) {
     fetch(API.leadStatus, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: state.lead.email })
     })
-      .then(r => r.json())
-      .then(j => {
-        if (j?.ok && j.lead) {
-          state.lead = { ...state.lead, ...j.lead };
-          try { localStorage.setItem("bloomogpt_lead", JSON.stringify(state.lead)); } catch {}
-          // also load suggestions for their sector
-          refreshSuggestions(state.lead.sector).then(() => ui());
-        }
-      })
-      .catch(() => {});
+    .then(r => r.json())
+    .then(j => {
+      if (j?.ok && j.lead) {
+        state.lead = { ...state.lead, ...j.lead };
+        try { localStorage.setItem("bloomogpt_lead", JSON.stringify(state.lead)); } catch {}
+        refreshSuggestions(state.lead.sector).then(() => ui());
+      }
+    })
+    .catch(() => {});
   }
 
   // ------- UI -------
@@ -183,10 +185,14 @@
       welcomeBackIfReturning();
       const sw = el.querySelector("#switch-user");
       if (sw) sw.onclick = () => {
-        try { localStorage.removeItem("bloomogpt_lead"); } catch {}
+        try {
+          localStorage.removeItem("bloomogpt_lead");
+          localStorage.removeItem("bloomogpt_conversation_id");
+        } catch {}
         state.lead = null;
         state.history = [];
         state._welcomed = false;
+        state.conversationId = null;
         ui();
       };
     }
@@ -261,6 +267,7 @@
       `<div class=msg><strong>You:</strong> ${escapeHTML(prompt)}</div><div class=msg><strong>Copilot:</strong> <span id="stream-${uid}"></span></div>`
     );
 
+    // --- send conversationId if we have one ---
     const res = await fetch(API.chat, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -269,9 +276,17 @@
         sector: state.lead?.sector || "general",
         prompt,
         history: state.history,
-        lead: state.lead
+        lead: state.lead,
+        conversationId: state.conversationId || null
       })
     });
+
+    // --- capture conversation id from header (persist it) ---
+    const newId = res.headers.get("x-conversation-id");
+    if (newId && newId !== state.conversationId) {
+      state.conversationId = newId;
+      try { localStorage.setItem("bloomogpt_conversation_id", newId); } catch {}
+    }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -301,7 +316,7 @@
     chat.insertAdjacentHTML("beforeend", `<div class="msg"><strong>Copilot:</strong> ${msg}</div>`);
   }
 
-  function escapeHTML(s){ return (s||"").replace(/[&<>"']/g,m=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[m])); }
+  function escapeHTML(s){ return (s||"").replace(/[&<>"']/g,m=>({ "&":"&amp;","<":"&lt;","&gt;":"&gt;","\"":"&quot;","'":"&#39;" }[m])); }
 
   function starterTasks(lang, sector) {
     const it = (I18N[lang] || I18N.en) === I18N.it;
