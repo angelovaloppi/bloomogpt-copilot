@@ -1,3 +1,4 @@
+// app/api/chat/route.ts
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
@@ -7,7 +8,10 @@ import { supaAdmin } from "../../lib/supa";
 import { corsHeaders } from "../../lib/cors";
 
 export async function OPTIONS(req: NextRequest) {
-  return new Response(null, { status: 204, headers: corsHeaders(req.headers.get("origin") || "") });
+  return new Response(null, {
+    status: 204,
+    headers: corsHeaders(req.headers.get("origin") || "")
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -20,44 +24,47 @@ export async function POST(req: NextRequest) {
       prompt = "",
       history = [],
       lead,                 // { name, email, sector }
-      conversationId        // optional
+      conversationId        // optional string
     } = body || {};
 
-    const email = lead?.email;
+    const email: string | undefined = lead?.email;
     if (!email) {
       return new Response(JSON.stringify({ error: "missing_email" }), {
-        status: 400, headers: { "Content-Type": "application/json", ...corsHeaders(origin) }
+        status: 400,
+        headers: { "Content-Type": "application/json", ...corsHeaders(origin) }
       });
     }
 
-    // 1) Ensure a conversation row exists (or create one)
-    let convoId = conversationId as string | undefined;
+    // 1) ensure a conversation exists (or create one)
+    let convoId: string | null = conversationId || null;
     if (!convoId) {
-      const { data: convo, error: cErr } = await supaAdmin
+      const ins = await supaAdmin
         .from("conversations")
         .insert({ email, title: `Chat with ${lead?.name || email}` })
         .select("id")
         .single();
-      if (cErr) throw cErr;
-      convoId = convo.id;
-      // analytics
-      await supaAdmin.from("analytics_events").insert({
-        email, kind: "conversation_created", sector, conversation_id: convoId, meta: { lang }
-      });
+      if (ins.error) throw ins.error;
+      convoId = ins.data.id as string;
+
+      await supaAdmin
+        .from("analytics_events")
+        .insert({ email, kind: "conversation_created", sector, conversation_id: convoId, meta: { lang } });
     }
 
-    // 2) Persist the incoming user message
-    await supaAdmin.from("messages").insert({
-      conversation_id: convoId, role: "user", content: prompt
-    });
-    await supaAdmin.from("analytics_events").insert({
-      email, kind: "message_user", sector, conversation_id: convoId, meta: { lang, len: prompt.length }
-    });
+    // 2) persist the user message
+    await supaAdmin
+      .from("messages")
+      .insert({ conversation_id: convoId, role: "user", content: String(prompt) });
 
-    // 3) Build system + past messages (load last 20 for context)
-    const sys = `You are BloomoGPT Business Copilot.
+    await supaAdmin
+      .from("analytics_events")
+      .insert({ email, kind: "message_user", sector, conversation_id: convoId, meta: { lang, len: String(prompt).length } });
+
+    // 3) build system + past messages (load last 20)
+    const sys =
+`You are BloomoGPT Business Copilot.
 Audience: companies optimizing domestic operations and export growth.
-Language: Reply in ${lang.toUpperCase()} unless the user clearly switches language.
+Language: Reply in ${String(lang).toUpperCase()} unless the user clearly switches language.
 Sector: ${lead?.sector || sector}.
 Guidelines:
 - Start with 2–3 concise sentences, then provide exactly 3 actionable next steps.
@@ -65,45 +72,58 @@ Guidelines:
 - Always surface 1 missing critical input to proceed.
 - If compliance/regulatory topics arise, ask for target market(s) and outline the checklist succinctly.`;
 
-    const { data: lastMsgs } = await supaAdmin
+    const pastRes = await supaAdmin
       .from("messages")
       .select("role,content,created_at")
       .eq("conversation_id", convoId)
       .order("created_at", { ascending: false })
       .limit(20);
 
-    const past = (lastMsgs || []).reverse().map(m => ({ role: m.role as "user"|"assistant"|"system", content: m.content }));
+    const past = (pastRes.data || []).reverse().map((m: any) => ({
+      role: m.role,
+      content: m.content
+    }));
 
+    // include any client-provided recent history (optional)
+    const mergedHistory = Array.isArray(history) ? history : [];
+    const messages = [
+      { role: "system", content: sys },
+      ...past,
+      ...mergedHistory,
+      { role: "user", content: String(prompt) }
+    ];
+
+    // 4) call OpenAI with streaming
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
     const completion = await client.chat.completions.create({
       model: "gpt-4.1-mini",
       temperature: 0.2,
       stream: true,
-      messages: [
-        { role: "system", content: sys },
-        ...past,
-        { role: "user", content: prompt }
-      ]
+      messages
     });
 
-    // 4) Stream out, while buffering full text to save after
     const encoder = new TextEncoder();
     let full = "";
 
     const stream = new ReadableStream({
       async start(controller) {
-        for await (const part of completion) {
-          const delta = part.choices?.[0]?.delta?.content || "";
-          if (delta) {
-            full += delta;
-            controller.enqueue(encoder.encode(delta));
+        try {
+          for await (const part of completion) {
+            const delta = part.choices?.[0]?.delta?.content || "";
+            if (delta) {
+              full += delta;
+              controller.enqueue(encoder.encode(delta));
+            }
           }
+        } catch (err) {
+          // If streaming fails, close gracefully
+        } finally {
+          controller.close();
         }
-        controller.close();
       }
     });
 
-    // 5) After stream completes, persist the assistant message (fire-and-forget)
+    // 5) after stream closes, persist assistant reply (fire-and-forget)
     stream.closed
       .then(async () => {
         try {
@@ -114,11 +134,13 @@ Guidelines:
           await supaAdmin.from("analytics_events").insert({
             email, kind: "message_assistant", sector, conversation_id: convoId, meta: { lang, len: full.length }
           });
-        } catch { /* ignore */ }
+        } catch {
+          // ignore
+        }
       })
-      .catch(() => { /* ignore */ });
+      .catch(() => {});
 
-    // 6) Return stream + conversationId so the frontend can keep it
+    // 6) return stream + conversation id (frontend should store it)
     return new Response(stream, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
@@ -129,7 +151,8 @@ Guidelines:
 
   } catch (e: any) {
     return new Response(JSON.stringify({ error: e?.message || String(e) }), {
-      status: 500, headers: { "Content-Type": "application/json", ...corsHeaders(origin) }
+      status: 500,
+      headers: { "Content-Type": "application/json", ...corsHeaders(origin) }
     });
   }
 }
