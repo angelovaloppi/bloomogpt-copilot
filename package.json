@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postbuild": "echo '🚨 REMINDER: Update Squarespace embed version (e.g., ?v=4) to refresh widget.js cache!'"
     "dev": "next dev",
     "build": "next build",
     "start": "next start"
