@@ -8,7 +8,7 @@ import OpenAI from "openai";
 import { supaAdmin } from "../../lib/supa";
 import { corsHeaders } from "../../lib/cors";
 
-// Optional env override (Vercel → Project Settings → Env)
+// Optional env override
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-4.1-turbo";
 
 export async function OPTIONS(req: NextRequest) {
@@ -47,18 +47,17 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Decide which model to use
+    // choose model
     const pickModel = () => {
       if (model === "turbo") return "gpt-4.1-turbo";
       if (model === "mini") return "gpt-4.1-mini";
-      // auto: returning users / existing conversation => turbo; otherwise mini
       if (conversationId || (lead?.sector && lead?.sector.length > 0)) return "gpt-4.1-turbo";
       return "gpt-4.1-mini";
     };
     const chosenModel = model === "auto" ? pickModel() : (model === "mini" ? "gpt-4.1-mini" : "gpt-4.1-turbo");
     const finalModel = DEFAULT_MODEL || chosenModel;
 
-    // 1) Ensure a conversation exists (or create one)
+    // 1) ensure conversation
     let convoId = conversationId || null;
     if (!convoId) {
       const ins = await supaAdmin
@@ -69,24 +68,26 @@ export async function POST(req: NextRequest) {
       if (ins.error) throw ins.error;
       convoId = ins.data.id as string;
 
-      // optional analytics
-      await supaAdmin
-        .from("analytics_events")
-        .insert({ email, kind: "conversation_created", sector, conversation_id: convoId, meta: { lang, model: finalModel } })
-        .catch(() => {});
+      try {
+        await supaAdmin
+          .from("analytics_events")
+          .insert({ email, kind: "conversation_created", sector, conversation_id: convoId, meta: { lang, model: finalModel } });
+      } catch {}
     }
 
-    // 2) Persist the user message
-    await supaAdmin
-      .from("messages")
-      .insert({ conversation_id: convoId, role: "user", content: String(prompt) })
-      .catch(() => {});
-    await supaAdmin
-      .from("analytics_events")
-      .insert({ email, kind: "message_user", sector, conversation_id: convoId, meta: { lang, len: String(prompt).length } })
-      .catch(() => {});
+    // 2) log user message
+    try {
+      await supaAdmin.from("messages").insert({
+        conversation_id: convoId, role: "user", content: String(prompt)
+      });
+    } catch {}
+    try {
+      await supaAdmin
+        .from("analytics_events")
+        .insert({ email, kind: "message_user", sector, conversation_id: convoId, meta: { lang, len: String(prompt).length } });
+    } catch {}
 
-    // 3) Build system + past messages (last 20)
+    // 3) system + past
     const sys =
 `You are BloomoGPT — a senior business intelligence & market expansion copilot.
 Audience: entrepreneurs, operators, and exporters seeking actionable insights.
@@ -107,8 +108,7 @@ Operating principles:
       .limit(20);
 
     const past = (pastRes.data || []).reverse().map((m: any) => ({
-      role: m.role,
-      content: m.content
+      role: m.role, content: m.content
     }));
 
     const mergedHistory = Array.isArray(history) ? history : [];
@@ -119,7 +119,7 @@ Operating principles:
       { role: "user", content: String(prompt) }
     ];
 
-    // 4) OpenAI streaming
+    // 4) OpenAI stream
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
     const completion = await client.chat.completions.create({
       model: finalModel,
@@ -141,17 +141,22 @@ Operating principles:
               controller.enqueue(encoder.encode(delta));
             }
           }
-          // After stream finishes, persist assistant reply & analytics
+          // persist assistant + analytics
           try {
             await supaAdmin.from("messages").insert({
               conversation_id: convoId, role: "assistant", content: full
             });
-            await supaAdmin.from("conversations")
+          } catch {}
+          try {
+            await supaAdmin
+              .from("conversations")
               .update({ last_active: new Date().toISOString() })
               .eq("id", convoId);
-            await supaAdmin.from("analytics_events").insert({
-              email, kind: "message_assistant", sector, conversation_id: convoId, meta: { lang, len: full.length, model: finalModel }
-            });
+          } catch {}
+          try {
+            await supaAdmin
+              .from("analytics_events")
+              .insert({ email, kind: "message_assistant", sector, conversation_id: convoId, meta: { lang, len: full.length, model: finalModel } });
           } catch {}
         } finally {
           controller.close();
@@ -159,7 +164,6 @@ Operating principles:
       }
     });
 
-    // 5) return stream + conversation id (frontend stores it)
     return new Response(stream, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
