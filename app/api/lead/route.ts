@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
 import { supaAdmin } from "../../lib/supa";
+import { corsHeaders } from "../../lib/cors";
 
 function cors(origin?: string) {
   return {
@@ -14,7 +15,10 @@ function cors(origin?: string) {
 }
 
 export async function OPTIONS(req: NextRequest) {
-  return new Response(null, { status: 204, headers: cors(req.headers.get("origin") || "") });
+  return new Response(null, {
+    status: 204,
+    headers: corsHeaders(req.headers.get("origin") || "")
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -35,7 +39,7 @@ export async function POST(req: NextRequest) {
       // bubble up a clear error
       return new Response(JSON.stringify({ ok: false, step: "insert_lead", error: leadErr.message }), {
         status: 500,
-        headers: { "Content-Type": "application/json", ...cors(req.headers.get("origin") || "") }
+        headers: { "Content-Type": "application/json", ...corsHeaders(req.headers.get("origin") || "") }
       });
     }
 
@@ -51,12 +55,14 @@ export async function POST(req: NextRequest) {
     if (evtErr) {
       return new Response(JSON.stringify({ ok: false, step: "insert_event", error: evtErr.message }), {
         status: 500,
-        headers: { "Content-Type": "application/json", ...cors(req.headers.get("origin") || "") }
+       headers: { "Content-Type": "application/json", ...corsHeaders(req.headers.get("origin") || "") }
+
       });
     }
 
     return new Response(JSON.stringify({ ok: true, lead: leadData?.[0] || null }), {
-      headers: { "Content-Type": "application/json", ...cors(req.headers.get("origin") || "") }
+     headers: { "Content-Type": "application/json", ...corsHeaders(req.headers.get("origin") || "") }
+
     });
   } catch (e: any) {
     return new Response(JSON.stringify({ ok: false, step: "exception", error: e?.message || String(e) }), {
