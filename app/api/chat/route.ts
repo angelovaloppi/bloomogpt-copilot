@@ -84,7 +84,6 @@ Guidelines:
       content: m.content
     }));
 
-    // include any client-provided recent history (optional)
     const mergedHistory = Array.isArray(history) ? history : [];
     const messages = [
       { role: "system", content: sys },
@@ -115,30 +114,26 @@ Guidelines:
               controller.enqueue(encoder.encode(delta));
             }
           }
-        } catch (err) {
-          // If streaming fails, close gracefully
+
+          // After streaming finishes, persist assistant reply & analytics
+          try {
+            await supaAdmin.from("messages").insert({
+              conversation_id: convoId, role: "assistant", content: full
+            });
+            await supaAdmin.from("conversations")
+              .update({ last_active: new Date().toISOString() })
+              .eq("id", convoId);
+            await supaAdmin.from("analytics_events").insert({
+              email, kind: "message_assistant", sector, conversation_id: convoId, meta: { lang, len: full.length }
+            });
+          } catch {
+            // ignore persistence errors
+          }
         } finally {
           controller.close();
         }
       }
     });
-
-    // 5) after stream closes, persist assistant reply (fire-and-forget)
-    stream.closed
-      .then(async () => {
-        try {
-          await supaAdmin.from("messages").insert({
-            conversation_id: convoId, role: "assistant", content: full
-          });
-          await supaAdmin.from("conversations").update({ last_active: new Date().toISOString() }).eq("id", convoId);
-          await supaAdmin.from("analytics_events").insert({
-            email, kind: "message_assistant", sector, conversation_id: convoId, meta: { lang, len: full.length }
-          });
-        } catch {
-          // ignore
-        }
-      })
-      .catch(() => {});
 
     // 6) return stream + conversation id (frontend should store it)
     return new Response(stream, {
