@@ -113,19 +113,40 @@
     el.innerHTML = `
       <style>
         .wrap { max-width: 820px; margin: 6vh auto; padding: 20px; }
-        .card { background: #0f0f10; border: 1px solid #242424; border-radius: 14px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+        .card { 
+          background:#0f0f10; border:1px solid #242424; border-radius:14px; padding:20px; 
+          box-shadow:0 10px 30px rgba(0,0,0,.25);
+          display:flex; flex-direction:column; gap:14px;    /* NEW: structure */
+        }
         h2 { margin: 0 0 16px 0; font-size: 28px; line-height: 1.2; letter-spacing: .3px; }
-        .row { margin: 14px 0; }
+        .row { margin: 0; }                                  /* tighten spacing */
         label { display:block; font-size: 13px; opacity:.9; margin-bottom:6px; }
         input, textarea, select { width:100%; padding:12px 14px; border-radius:10px; border:1px solid #2b2b2b; background:#121214; color:#fff; }
         button { padding:12px 16px; border-radius:10px; border:1px solid #2b2b2b; background:#1b1b1e; color:#fff; cursor:pointer; }
         button.primary { background:#1f2937; }
         .chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
         .chip{ padding:8px 12px; border-radius:999px; border:1px solid #2b2b2b; background:#141416; cursor:pointer; font-size:13px; }
-        .msg{ white-space:pre-wrap; line-height:1.6; border-top:1px solid #1d1d1f; padding-top:12px; margin-top:12px; }
         .subtitle { opacity:.85; font-size:14px; display:flex; align-items:center; gap:10px; justify-content:space-between; }
         .flex { display:flex; gap:8px; }
         @media (max-width: 640px){ .flex { flex-direction:column; } }
+
+        /* NEW: conversation above, scrollable */
+        .chatbox{
+          max-height:55vh;
+          overflow:auto;
+          border-top:1px solid #1d1d1f;
+          padding-top:12px;
+          margin-top:8px;
+        }
+        .msg{ white-space:pre-wrap; line-height:1.6; margin-top:12px; }
+
+        /* NEW: input area always available at bottom of card */
+        .footer{
+          position:sticky;
+          bottom:0;
+          background:#0f0f10;
+          padding-top:8px;
+        }
       </style>
 
       <div class="wrap">
@@ -144,11 +165,11 @@
                 <input id="lead-email" placeholder="${t("email")}" />
               </div>
             </div>
-            <div class="row">
+            <div class="row" style="margin-top:12px">
               <label>${t("sectorLabel")}</label>
               <input id="lead-sector" placeholder="${t("sector")}" />
             </div>
-            <div class="row">
+            <div class="row" style="margin-top:12px">
               <button id="lead-save" class="primary">${t("continue")}</button>
             </div>
           ` : `
@@ -162,15 +183,17 @@
               <div id="sugg" class="chips"></div>
             </div>
 
-            <div class="row">
+            <!-- CHAT ABOVE -->
+            <div id="chat" class="row chatbox"></div>
+
+            <!-- INPUT AT BOTTOM -->
+            <div class="row footer">
               <label>${t("yourRequest")}</label>
               <div class="flex">
                 <input id="prompt" placeholder="${t("requestPlaceholder")}" />
                 <button id="ask" class="primary">${t("ask")}</button>
               </div>
             </div>
-
-            <div id="chat" class="row"></div>
           `}
         </div>
       </div>
@@ -256,6 +279,11 @@
     });
   }
 
+  function scrollChatToBottom() {
+    const box = el.querySelector("#chat");
+    if (box) box.scrollTop = box.scrollHeight;
+  }
+
   async function ask() {
     const input = el.querySelector("#prompt");
     const prompt = input.value.trim();
@@ -264,8 +292,10 @@
     const chat = el.querySelector("#chat");
     const uid = state.history.length;
     chat.insertAdjacentHTML("beforeend",
-      `<div class=msg><strong>You:</strong> ${escapeHTML(prompt)}</div><div class=msg><strong>Copilot:</strong> <span id="stream-${uid}"></span></div>`
+      `<div class="msg"><strong>You:</strong> ${escapeHTML(prompt)}</div>
+       <div class="msg"><strong>Copilot:</strong> <span id="stream-${uid}"></span></div>`
     );
+    scrollChatToBottom();
 
     // --- send conversationId if we have one ---
     const res = await fetch(API.chat, {
@@ -292,13 +322,14 @@
     const decoder = new TextDecoder();
     let all = "";
     const spanId = `#stream-${uid}`;
-    while(true){
+    while (true) {
       const { value, done } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value);
       all += chunk;
       const span = el.querySelector(spanId);
       if (span) span.textContent = all;
+      scrollChatToBottom();
     }
     state.history.push({ role:"user", content: prompt }, { role:"assistant", content: all });
     input.value = "";
@@ -314,6 +345,7 @@
     const sector = escapeHTML(state.lead.sector || "");
     const msg = (I18N[state.lang] || I18N.en).welcomeBack(name, sector);
     chat.insertAdjacentHTML("beforeend", `<div class="msg"><strong>Copilot:</strong> ${msg}</div>`);
+    scrollChatToBottom();
   }
 
   function escapeHTML(s){ return (s||"").replace(/[&<>"']/g,m=>({ "&":"&amp;","<":"&lt;","&gt;":"&gt;","\"":"&quot;","'":"&#39;" }[m])); }
