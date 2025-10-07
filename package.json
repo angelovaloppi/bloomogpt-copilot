@@ -1,24 +1,18 @@
 {
   "name": "bloomogpt-copilot",
   "private": true,
-  "type": "module",
+  "version": "0.1.0",
   "scripts": {
-    "postbuild": "echo '🚨 REMINDER: Update Squarespace embed version (e.g., ?v=4) to refresh widget.js cache!'"
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "postbuild": "echo \"🚨 REMINDER: Update Squarespace embed version (e.g., ?v=4) to refresh widget.js cache!\""
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.45.4",
     "next": "14.2.5",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
     "openai": "4.58.0",
-    "@supabase/supabase-js": "2.45.4"
-  },
-  "devDependencies": {
-    "typescript": "5.4.5",
-    "@types/react": "18.3.3",
-    "@types/node": "20.11.30"
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   }
 }
-
