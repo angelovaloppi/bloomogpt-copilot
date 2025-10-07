@@ -7,6 +7,9 @@ import OpenAI from "openai";
 import { supaAdmin } from "../../lib/supa";
 import { corsHeaders } from "../../lib/cors";
 
+// You can override the default from Vercel env if you want (OPENAI_MODEL)
+const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-4.1-turbo";
+
 export async function OPTIONS(req: NextRequest) {
   return new Response(null, {
     status: 204,
@@ -17,6 +20,13 @@ export async function OPTIONS(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const origin = req.headers.get("origin") || "";
   try {
+    if (!process.env.OPENAI_API_KEY) {
+      return new Response(JSON.stringify({ error: "missing_openai_key" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json", ...corsHeaders(origin) }
+      });
+    }
+
     const body = await req.json();
     const {
       lang = "en",
@@ -24,7 +34,8 @@ export async function POST(req: NextRequest) {
       prompt = "",
       history = [],
       lead,                 // { name, email, sector }
-      conversationId        // optional string
+      conversationId,       // optional string
+      model = "auto"        // "turbo" | "mini" | "auto" (optional)
     } = body || {};
 
     const email: string | undefined = lead?.email;
@@ -35,42 +46,58 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Decide model
+    const pickModel = () => {
+      if (model === "turbo") return "gpt-4.1-turbo";
+      if (model === "mini") return "gpt-4.1-mini";
+      // auto: return users / existing conversation => turbo; otherwise mini
+      if (conversationId || (lead?.sector && lead?.sector.length > 0)) return "gpt-4.1-turbo";
+      return "gpt-4.1-mini";
+    };
+    const chosenModel = model === "auto" ? pickModel() : (model === "mini" ? "gpt-4.1-mini" : "gpt-4.1-turbo");
+    const finalModel = DEFAULT_MODEL || chosenModel;
+
     // 1) ensure a conversation exists (or create one)
     let convoId: string | null = conversationId || null;
     if (!convoId) {
       const ins = await supaAdmin
         .from("conversations")
-        .insert({ email, title: `Chat with ${lead?.name || email}` })
+        .insert({ email, title: `Chat with ${lead?.name || email}`, sector: lead?.sector || sector })
         .select("id")
         .single();
       if (ins.error) throw ins.error;
       convoId = ins.data.id as string;
 
+      // optional analytics (table must exist already)
       await supaAdmin
         .from("analytics_events")
-        .insert({ email, kind: "conversation_created", sector, conversation_id: convoId, meta: { lang } });
+        .insert({ email, kind: "conversation_created", sector, conversation_id: convoId, meta: { lang, model: finalModel } })
+        .catch(() => {});
     }
 
     // 2) persist the user message
     await supaAdmin
       .from("messages")
-      .insert({ conversation_id: convoId, role: "user", content: String(prompt) });
+      .insert({ conversation_id: convoId, role: "user", content: String(prompt) })
+      .catch(() => {});
 
     await supaAdmin
       .from("analytics_events")
-      .insert({ email, kind: "message_user", sector, conversation_id: convoId, meta: { lang, len: String(prompt).length } });
+      .insert({ email, kind: "message_user", sector, conversation_id: convoId, meta: { lang, len: String(prompt).length } })
+      .catch(() => {});
 
     // 3) build system + past messages (load last 20)
     const sys =
-`You are BloomoGPT Business Copilot.
-Audience: companies optimizing domestic operations and export growth.
+`You are BloomoGPT — a senior business intelligence & market expansion copilot.
+Audience: entrepreneurs, operators, and exporters seeking actionable insights.
 Language: Reply in ${String(lang).toUpperCase()} unless the user clearly switches language.
 Sector: ${lead?.sector || sector}.
-Guidelines:
-- Start with 2–3 concise sentences, then provide exactly 3 actionable next steps.
-- Prefer structured outputs (bullets/tables/checklists) when useful.
-- Always surface 1 missing critical input to proceed.
-- If compliance/regulatory topics arise, ask for target market(s) and outline the checklist succinctly.`;
+Operating principles:
+- Be specific, data-driven, and ROI-oriented like a management consultant.
+- Output structure: 2-sentence executive summary, then EXACTLY 3 actionable next steps.
+- When region/country is mentioned, include market trends, key players, costs, and practical channels.
+- Surface 1 critical missing input to proceed (if any).
+- Prefer tables/checklists when useful. Avoid fluff.`;
 
     const pastRes = await supaAdmin
       .from("messages")
@@ -92,13 +119,13 @@ Guidelines:
       { role: "user", content: String(prompt) }
     ];
 
-    // 4) call OpenAI with streaming
+    // 4) OpenAI streaming
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
     const completion = await client.chat.completions.create({
-      model: "gpt-4.1-mini",
-      temperature: 0.2,
-      stream: true,
-      messages
+      model: finalModel,          // <<< upgrade here
+      temperature: 0.3,           // a bit more breadth
+      messages,
+      stream: true
     });
 
     const encoder = new TextEncoder();
@@ -115,7 +142,7 @@ Guidelines:
             }
           }
 
-          // After streaming finishes, persist assistant reply & analytics
+          // After stream finishes, persist assistant reply & analytics
           try {
             await supaAdmin.from("messages").insert({
               conversation_id: convoId, role: "assistant", content: full
@@ -124,18 +151,16 @@ Guidelines:
               .update({ last_active: new Date().toISOString() })
               .eq("id", convoId);
             await supaAdmin.from("analytics_events").insert({
-              email, kind: "message_assistant", sector, conversation_id: convoId, meta: { lang, len: full.length }
+              email, kind: "message_assistant", sector, conversation_id: convoId, meta: { lang, len: full.length, model: finalModel }
             });
-          } catch {
-            // ignore persistence errors
-          }
+          } catch { /* ignore */ }
         } finally {
           controller.close();
         }
       }
     });
 
-    // 6) return stream + conversation id (frontend should store it)
+    // 5) return stream + conversation id
     return new Response(stream, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
